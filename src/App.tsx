@@ -18,7 +18,6 @@ import {
 const ALGORITHMS: Algorithm[] = ['HS256', 'HS384', 'HS512']
 
 const STANDARD_FIELDS: { key: keyof StandardClaims; label: string; required?: boolean }[] = [
-  { key: 'sub', label: 'Subject (sub)' },
   { key: 'iss', label: 'Issuer (iss)' },
   { key: 'aud', label: 'Audience (aud)' },
   { key: 'iat', label: 'Issued at (iat)' },
@@ -32,7 +31,6 @@ function newClaimId() {
 
 function App() {
   const [claims, setClaims] = useState<StandardClaims>({
-    sub: '',
     iss: '',
     aud: '',
     exp: defaultExp(),

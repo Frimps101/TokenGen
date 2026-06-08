@@ -1,7 +1,6 @@
 import type { Algorithm } from './jwt'
 
 export interface StandardClaims {
-  sub: string
   iss: string
   aud: string
   exp: string
@@ -15,7 +14,7 @@ export interface CustomClaim {
   value: string
 }
 
-const RESERVED_CLAIMS = new Set(['sub', 'iss', 'aud', 'exp', 'iat', 'nbf', 'alg', 'typ'])
+const RESERVED_CLAIMS = new Set(['iss', 'aud', 'exp', 'iat', 'nbf', 'alg', 'typ'])
 
 export function datetimeToUnix(value: string): number | null {
   if (!value.trim()) return null
@@ -121,7 +120,6 @@ export function buildPayload(
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {}
 
-  if (claims.sub.trim()) payload.sub = claims.sub.trim()
   if (claims.iss.trim()) payload.iss = claims.iss.trim()
   if (claims.aud.trim()) payload.aud = claims.aud.trim()
 

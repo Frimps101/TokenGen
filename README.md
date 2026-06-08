@@ -4,7 +4,7 @@ A client-side JWT token generator that runs entirely in your browser. Build stan
 
 ## Features
 
-- Standard JWT claims: `sub`, `iss`, `aud`, `exp`, `iat`, `nbf`
+- Standard JWT claims: `iss`, `aud`, `exp`, `iat`, `nbf` (plus any custom claims like `sub`, `userId`, etc.)
 - Dynamic custom claims (key-value pairs)
 - HMAC signing: HS256, HS384, HS512
 - Masked secret key with show/hide toggle
