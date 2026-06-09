@@ -1,10 +1,13 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   buildPayload,
-  defaultExp,
-  defaultIat,
+  EXP_DURATION_OPTIONS,
+  formatExpirySummary,
+  formatReadableDate,
+  resolveExp,
   validateForm,
   type CustomClaim,
+  type ExpDuration,
   type StandardClaims,
 } from './lib/validation'
 import {
@@ -17,26 +20,25 @@ import {
 
 const ALGORITHMS: Algorithm[] = ['HS256', 'HS384', 'HS512']
 
-const STANDARD_FIELDS: { key: keyof StandardClaims; label: string; required?: boolean }[] = [
+const STANDARD_FIELDS: { key: 'iss' | 'aud'; label: string }[] = [
   { key: 'iss', label: 'Issuer (iss)' },
   { key: 'aud', label: 'Audience (aud)' },
-  { key: 'iat', label: 'Issued at (iat)' },
-  { key: 'exp', label: 'Expiration (exp)', required: true },
-  { key: 'nbf', label: 'Not before (nbf)' },
 ]
+
+const DEFAULT_CLAIMS: StandardClaims = {
+  iss: '',
+  aud: '',
+  expDuration: '7d',
+  expCustom: '',
+  nbf: '',
+}
 
 function newClaimId() {
   return crypto.randomUUID()
 }
 
 function App() {
-  const [claims, setClaims] = useState<StandardClaims>({
-    iss: '',
-    aud: '',
-    exp: defaultExp(),
-    iat: defaultIat(),
-    nbf: '',
-  })
+  const [claims, setClaims] = useState<StandardClaims>(DEFAULT_CLAIMS)
   const [customClaims, setCustomClaims] = useState<CustomClaim[]>([])
   const [algorithm, setAlgorithm] = useState<Algorithm>('HS256')
   const [secret, setSecret] = useState('')
@@ -45,6 +47,26 @@ function App() {
   const [errors, setErrors] = useState<string[]>([])
   const [copied, setCopied] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [currentIat, setCurrentIat] = useState(() => Math.floor(Date.now() / 1000))
+  const [customClaimsOpen, setCustomClaimsOpen] = useState(false)
+
+  useEffect(() => {
+    const tick = () => setCurrentIat(Math.floor(Date.now() / 1000))
+    tick()
+    const id = setInterval(tick, 30_000)
+    return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    if (!customClaimsOpen) return
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCustomClaimsOpen(false)
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [customClaimsOpen])
 
   const updateClaim = (key: keyof StandardClaims, value: string) => {
     setClaims((prev) => ({ ...prev, [key]: value }))
@@ -78,6 +100,8 @@ function App() {
       const payload = buildPayload(claims, customClaims, parseClaimValue)
       const signed = await signJwt(payload, secret, algorithm)
       setToken(signed)
+      const stampedIat = decodePayload(signed)?.iat
+      if (typeof stampedIat === 'number') setCurrentIat(stampedIat)
     } catch {
       setErrors(['Failed to sign token. Check your secret key and try again.'])
       setToken('')
@@ -97,39 +121,74 @@ function App() {
     }
   }
 
+  const handleReset = () => {
+    const hasData =
+      secret ||
+      token ||
+      customClaims.length > 0 ||
+      claims.iss ||
+      claims.aud ||
+      claims.nbf ||
+      claims.expDuration !== '7d' ||
+      claims.expCustom
+
+    if (hasData && !window.confirm('Reset all fields and clear the generated token?')) {
+      return
+    }
+
+    setClaims(DEFAULT_CLAIMS)
+    setCustomClaims([])
+    setAlgorithm('HS256')
+    setSecret('')
+    setShowSecret(false)
+    setToken('')
+    setErrors([])
+    setCopied(false)
+    setCurrentIat(Math.floor(Date.now() / 1000))
+    setCustomClaimsOpen(false)
+  }
+
   const tokenParts = token ? splitToken(token) : null
   const decoded = token ? decodePayload(token) : null
+  const resolvedExp = resolveExp(claims)
+
+  const generateButton = (
+    <button
+      type="button"
+      onClick={handleGenerate}
+      disabled={generating}
+      className="w-full rounded-xl bg-orange-600 px-6 py-3 text-base font-semibold text-cursor-text shadow-lg shadow-orange-600/25 transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:min-w-48"
+    >
+      {generating ? 'Signing…' : 'Generate token'}
+    </button>
+  )
 
   return (
-    <div className="min-h-svh bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
-      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <header className="mb-8 text-center">
-          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-1.5 text-sm text-emerald-300">
-            <span className="h-2 w-2 rounded-full bg-emerald-400" />
-            100% client-side — your secret never leaves this device
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-            JWT Token Generator
-          </h1>
-          <p className="mt-2 text-slate-400">
-            Build and sign JSON Web Tokens locally using the Web Crypto API
-          </p>
-        </header>
+    <div className="min-h-svh bg-cursor-bg">
+      <header className="border-b border-cursor-divider px-4 py-5 text-center sm:px-6">
+        <h1 className="text-xl font-bold tracking-tight text-cursor-text sm:text-2xl">
+          JWT Token Generator
+        </h1>
+        <p className="mt-1 text-xs text-cursor-muted sm:text-sm">
+          Fill in your claims, sign with a secret, copy the token
+        </p>
+      </header>
 
-        <div className="grid gap-6 lg:grid-cols-2">
-          <section className="space-y-6">
-            <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-5 backdrop-blur sm:p-6">
-              <h2 className="mb-4 text-lg font-semibold text-white">Signing</h2>
-              <div className="space-y-4">
+      <main>
+        <div className="mx-auto grid w-full max-w-6xl items-start gap-6 px-4 py-6 sm:px-6 lg:grid-cols-2 lg:px-8">
+          <section className="space-y-5 lg:pr-2">
+            <div className="rounded-xl border border-cursor-border bg-cursor-surface p-5 sm:p-6">
+              <h2 className="mb-4 text-lg font-semibold text-cursor-text">Signing</h2>
+              <div className="grid gap-4 sm:grid-cols-[10rem_1fr]">
                 <div>
-                  <label htmlFor="algorithm" className="mb-1.5 block text-sm font-medium text-slate-300">
+                  <label htmlFor="algorithm" className="mb-1.5 block text-sm font-medium text-cursor-text">
                     Algorithm
                   </label>
                   <select
                     id="algorithm"
                     value={algorithm}
                     onChange={(e) => setAlgorithm(e.target.value as Algorithm)}
-                    className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2.5 text-white outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+                    className="w-full rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2.5 text-cursor-text outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                   >
                     {ALGORITHMS.map((alg) => (
                       <option key={alg} value={alg}>
@@ -140,8 +199,8 @@ function App() {
                 </div>
 
                 <div>
-                  <label htmlFor="secret" className="mb-1.5 block text-sm font-medium text-slate-300">
-                    Secret key <span className="text-rose-400">*</span>
+                  <label htmlFor="secret" className="mb-1.5 block text-sm font-medium text-cursor-text">
+                    Secret key <span className="text-cursor-error">*</span>
                   </label>
                   <div className="relative">
                     <input
@@ -150,12 +209,12 @@ function App() {
                       value={secret}
                       onChange={(e) => setSecret(e.target.value)}
                       placeholder="Enter your HMAC secret"
-                      className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2.5 pr-20 font-mono text-sm text-white outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+                      className="w-full rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2.5 pr-20 font-mono text-sm text-cursor-text outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                     />
                     <button
                       type="button"
                       onClick={() => setShowSecret((s) => !s)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-700 hover:text-white"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-xs text-cursor-muted hover:bg-cursor-elevated hover:text-cursor-text"
                     >
                       {showSecret ? 'Hide' : 'Show'}
                     </button>
@@ -164,113 +223,135 @@ function App() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-5 backdrop-blur sm:p-6">
-              <h2 className="mb-4 text-lg font-semibold text-white">Standard claims</h2>
+            <div className="rounded-xl border border-cursor-border bg-cursor-surface p-5 sm:p-6">
+              <h2 className="mb-4 text-lg font-semibold text-cursor-text">Standard claims</h2>
               <div className="grid gap-4 sm:grid-cols-2">
-                {STANDARD_FIELDS.map(({ key, label, required }) => (
-                  <div key={key} className={key === 'exp' || key === 'iat' || key === 'nbf' ? 'sm:col-span-2' : ''}>
-                    <label htmlFor={key} className="mb-1.5 block text-sm font-medium text-slate-300">
+                {STANDARD_FIELDS.map(({ key, label }) => (
+                  <div key={key}>
+                    <label htmlFor={key} className="mb-1.5 block text-sm font-medium text-cursor-text">
                       {label}
-                      {required && <span className="text-rose-400"> *</span>}
                     </label>
-                    {key === 'exp' || key === 'iat' || key === 'nbf' ? (
-                      <input
-                        id={key}
-                        type="datetime-local"
-                        value={claims[key]}
-                        onChange={(e) => updateClaim(key, e.target.value)}
-                        className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2.5 text-white outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
-                      />
-                    ) : (
-                      <input
-                        id={key}
-                        type="text"
-                        value={claims[key]}
-                        onChange={(e) => updateClaim(key, e.target.value)}
-                        placeholder={`Enter ${key}`}
-                        className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2.5 text-white outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
-                      />
-                    )}
+                    <input
+                      id={key}
+                      type="text"
+                      value={claims[key]}
+                      onChange={(e) => updateClaim(key, e.target.value)}
+                      placeholder={`Enter ${key}`}
+                      className="w-full rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2.5 text-cursor-text outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                    />
                   </div>
                 ))}
+
+                <div className="sm:col-span-2">
+                  <label htmlFor="iat" className="mb-1.5 block text-sm font-medium text-cursor-text">
+                    Issued at (iat)
+                  </label>
+                  <input
+                    id="iat"
+                    readOnly
+                    value={formatReadableDate(currentIat)}
+                    className="w-full cursor-default rounded-lg border border-cursor-border bg-cursor-bg px-3 py-2.5 text-cursor-text outline-none"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label htmlFor="expDuration" className="mb-1.5 block text-sm font-medium text-cursor-text">
+                    Expiration (exp) <span className="text-cursor-error">*</span>
+                  </label>
+                  <select
+                    id="expDuration"
+                    value={claims.expDuration}
+                    onChange={(e) =>
+                      setClaims((prev) => ({ ...prev, expDuration: e.target.value as ExpDuration }))
+                    }
+                    className="w-full rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2.5 text-cursor-text outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  >
+                    {EXP_DURATION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  {claims.expDuration === 'custom' && (
+                    <input
+                      id="expCustom"
+                      type="datetime-local"
+                      value={claims.expCustom}
+                      onChange={(e) =>
+                        setClaims((prev) => ({ ...prev, expCustom: e.target.value }))
+                      }
+                      className="mt-3 w-full rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2.5 text-cursor-text outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                    />
+                  )}
+                  {resolvedExp !== null && (
+                    <p className="mt-2 text-sm text-orange-300/90">
+                      Expires {formatReadableDate(resolvedExp)} ({formatExpirySummary(resolvedExp)})
+                    </p>
+                  )}
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label htmlFor="nbf" className="mb-1.5 block text-sm font-medium text-cursor-text">
+                    Not before (nbf)
+                  </label>
+                  <input
+                    id="nbf"
+                    type="datetime-local"
+                    value={claims.nbf}
+                    onChange={(e) => updateClaim('nbf', e.target.value)}
+                    className="w-full rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2.5 text-cursor-text outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-5 backdrop-blur sm:p-6">
+            <div className="rounded-xl border border-cursor-border bg-cursor-surface p-5 sm:p-6">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-white">Custom claims</h2>
+                <h2 className="text-lg font-semibold text-cursor-text">Custom claims</h2>
                 <button
                   type="button"
-                  onClick={addCustomClaim}
-                  className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:border-violet-500 hover:text-white"
+                  onClick={() => setCustomClaimsOpen(true)}
+                  className="rounded-lg border border-cursor-border-strong px-3 py-1.5 text-sm text-orange-400 hover:border-orange-500 hover:text-cursor-text"
                 >
-                  + Add claim
+                  {customClaims.length === 0 ? '+ Add' : 'Edit'}
                 </button>
               </div>
 
               {customClaims.length === 0 ? (
-                <p className="text-sm text-slate-500">No custom claims yet.</p>
+                <p className="text-sm text-cursor-subtle">
+                  No custom claims yet. Add key-value pairs like userId, role, staffId…
+                </p>
               ) : (
-                <div className="space-y-3">
+                <ul className="space-y-2">
                   {customClaims.map((claim) => (
-                    <div key={claim.id} className="flex gap-2">
-                      <input
-                        type="text"
-                        value={claim.key}
-                        onChange={(e) => updateCustomClaim(claim.id, 'key', e.target.value)}
-                        placeholder="Key"
-                        className="w-1/3 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 font-mono text-sm text-white outline-none focus:border-violet-500"
-                      />
-                      <input
-                        type="text"
-                        value={claim.value}
-                        onChange={(e) => updateCustomClaim(claim.id, 'value', e.target.value)}
-                        placeholder="Value"
-                        className="flex-1 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 font-mono text-sm text-white outline-none focus:border-violet-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeCustomClaim(claim.id)}
-                        className="rounded-lg px-3 py-2 text-slate-400 hover:bg-rose-500/20 hover:text-rose-400"
-                        aria-label="Remove claim"
-                      >
-                        ✕
-                      </button>
-                    </div>
+                    <li
+                      key={claim.id}
+                      className="flex items-baseline gap-2 rounded-lg bg-cursor-bg/60 px-3 py-2 font-mono text-sm"
+                    >
+                      <span className="shrink-0 text-orange-400">
+                        {claim.key.trim() || '(empty key)'}
+                      </span>
+                      <span className="text-cursor-subtle">:</span>
+                      <span className="min-w-0 truncate text-cursor-text">
+                        {claim.value.trim() || '(empty)'}
+                      </span>
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
             </div>
 
-            {errors.length > 0 && (
-              <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-4">
-                <ul className="space-y-1 text-sm text-rose-300">
-                  {errors.map((err) => (
-                    <li key={err}>• {err}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={handleGenerate}
-              disabled={generating}
-              className="w-full rounded-xl bg-violet-600 px-6 py-3.5 text-base font-semibold text-white shadow-lg shadow-violet-600/25 transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {generating ? 'Signing…' : 'Generate token'}
-            </button>
           </section>
 
-          <section className="space-y-6">
-            <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-5 backdrop-blur sm:p-6">
+          <section className="space-y-5 lg:pl-2">
+            <div className="rounded-xl border border-cursor-border bg-cursor-surface p-5 sm:p-6">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-white">Generated token</h2>
+                <h2 className="text-lg font-semibold text-cursor-text">Generated token</h2>
                 {token && (
                   <button
                     type="button"
                     onClick={handleCopy}
-                    className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:border-violet-500 hover:text-white"
+                    className="rounded-lg border border-cursor-border-strong px-3 py-1.5 text-sm text-cursor-text hover:border-orange-500 hover:text-cursor-text"
                   >
                     {copied ? 'Copied!' : 'Copy'}
                   </button>
@@ -278,27 +359,27 @@ function App() {
               </div>
 
               {tokenParts ? (
-                <div className="overflow-x-auto rounded-lg bg-slate-950 p-4 font-mono text-sm leading-relaxed break-all">
+                <div className="overflow-x-auto rounded-lg bg-cursor-bg p-4 font-mono text-sm leading-relaxed break-all">
                   <span className="text-rose-400">{tokenParts[0]}</span>
-                  <span className="text-slate-500">.</span>
-                  <span className="text-violet-400">{tokenParts[1]}</span>
-                  <span className="text-slate-500">.</span>
+                  <span className="text-cursor-subtle">.</span>
+                  <span className="text-orange-400">{tokenParts[1]}</span>
+                  <span className="text-cursor-subtle">.</span>
                   <span className="text-amber-400">{tokenParts[2]}</span>
                 </div>
               ) : (
-                <div className="rounded-lg border border-dashed border-slate-700 bg-slate-950/50 p-8 text-center text-sm text-slate-500">
+                <div className="rounded-lg border border-dashed border-cursor-border bg-cursor-bg/50 p-8 text-center text-sm text-cursor-subtle">
                   Your signed JWT will appear here
                 </div>
               )}
 
               {tokenParts && (
-                <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-400">
+                <div className="mt-3 flex flex-wrap gap-3 text-xs text-cursor-muted">
                   <span className="flex items-center gap-1.5">
                     <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
                     Header
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <span className="h-2.5 w-2.5 rounded-full bg-violet-400" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-orange-400" />
                     Payload
                   </span>
                   <span className="flex items-center gap-1.5">
@@ -309,29 +390,127 @@ function App() {
               )}
             </div>
 
-            <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-5 backdrop-blur sm:p-6">
-              <h2 className="mb-4 text-lg font-semibold text-white">Decoded payload</h2>
+            <div className="rounded-xl border border-cursor-border bg-cursor-surface p-5 sm:p-6">
+              <h2 className="mb-4 text-lg font-semibold text-cursor-text">Decoded payload</h2>
               {decoded ? (
-                <pre className="overflow-x-auto rounded-lg bg-slate-950 p-4 font-mono text-sm leading-relaxed text-emerald-300">
+                <pre className="overflow-x-auto rounded-lg bg-cursor-bg p-4 font-mono text-sm leading-relaxed text-emerald-300">
                   {JSON.stringify(decoded, null, 2)}
                 </pre>
               ) : (
-                <div className="rounded-lg border border-dashed border-slate-700 bg-slate-950/50 p-8 text-center text-sm text-slate-500">
+                <div className="rounded-lg border border-dashed border-cursor-border bg-cursor-bg/50 p-8 text-center text-sm text-cursor-subtle">
                   Decoded JSON will appear here
                 </div>
               )}
             </div>
 
-            <div className="rounded-xl border border-slate-700/40 bg-slate-800/30 p-4 text-sm text-slate-400">
-              <p>
-                <strong className="text-slate-300">Privacy:</strong> All signing happens in your
-                browser via the Web Crypto API. No data is sent to any server. Close this tab and
-                everything is gone.
-              </p>
-            </div>
           </section>
         </div>
+      </main>
+
+      {/* In-flow spacer so fixed buttons never cover scrollable content */}
+      <div className="h-24 shrink-0" aria-hidden="true" />
+
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-10">
+        <div className="pointer-events-auto mx-auto flex max-w-6xl flex-col gap-3 bg-cursor-bg px-4 py-4 sm:flex-row sm:items-center sm:px-6 lg:px-8">
+          {errors.length > 0 && (
+            <p className="min-w-0 flex-1 truncate text-sm text-cursor-error">
+              {errors.join(' · ')}
+            </p>
+          )}
+          <div className={`flex gap-3 ${errors.length > 0 ? '' : 'sm:ml-auto'}`}>
+            <button
+              type="button"
+              onClick={handleReset}
+              className="rounded-xl border border-cursor-border-strong px-5 py-3 text-sm font-medium text-cursor-text transition hover:border-cursor-muted hover:text-cursor-text"
+            >
+              Reset
+            </button>
+            {generateButton}
+          </div>
+        </div>
       </div>
+
+      {customClaimsOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 p-4 sm:items-center"
+          onClick={() => setCustomClaimsOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border border-cursor-border bg-cursor-surface shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="custom-claims-title"
+          >
+            <div className="flex items-center justify-between border-b border-cursor-border px-5 py-4">
+              <h2 id="custom-claims-title" className="text-lg font-semibold text-cursor-text">
+                Custom claims
+              </h2>
+              <button
+                type="button"
+                onClick={() => setCustomClaimsOpen(false)}
+                className="rounded-lg px-2 py-1 text-cursor-muted hover:bg-cursor-elevated hover:text-cursor-text"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              {customClaims.length === 0 ? (
+                <p className="text-sm text-cursor-subtle">No custom claims yet. Add one below.</p>
+              ) : (
+                <div className="space-y-3">
+                  {customClaims.map((claim) => (
+                    <div key={claim.id} className="flex gap-2">
+                      <input
+                        type="text"
+                        value={claim.key}
+                        onChange={(e) => updateCustomClaim(claim.id, 'key', e.target.value)}
+                        placeholder="Key"
+                        className="w-1/3 rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2 font-mono text-sm text-cursor-text outline-none focus:border-orange-500"
+                      />
+                      <input
+                        type="text"
+                        value={claim.value}
+                        onChange={(e) => updateCustomClaim(claim.id, 'value', e.target.value)}
+                        placeholder="Value"
+                        className="flex-1 rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2 font-mono text-sm text-cursor-text outline-none focus:border-orange-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeCustomClaim(claim.id)}
+                        className="rounded-lg px-3 py-2 text-cursor-muted hover:bg-rose-500/20 hover:text-rose-400"
+                        aria-label="Remove claim"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 border-t border-cursor-border px-5 py-4">
+              <button
+                type="button"
+                onClick={addCustomClaim}
+                className="rounded-lg border border-cursor-border-strong px-4 py-2 text-sm text-cursor-text hover:border-orange-500 hover:text-cursor-text"
+              >
+                + Add claim
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomClaimsOpen(false)}
+                className="ml-auto rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-cursor-text hover:bg-orange-500"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
