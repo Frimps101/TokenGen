@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   buildPayload,
   EXP_DURATION_OPTIONS,
@@ -37,6 +37,94 @@ function newClaimId() {
   return crypto.randomUUID()
 }
 
+const datetimeInputClassName =
+  'field-datetime w-full rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2.5 pr-10 text-cursor-text outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500'
+
+function DatetimeInput({
+  id,
+  value,
+  onChange,
+  className = '',
+}: {
+  id: string
+  value: string
+  onChange: (value: string) => void
+  className?: string
+}) {
+  return (
+    <div className={`field-datetime-wrap relative ${className}`}>
+      <input
+        id={id}
+        type="datetime-local"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={datetimeInputClassName}
+      />
+      <svg
+        className="field-datetime-icon pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-cursor-text"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
+      </svg>
+    </div>
+  )
+}
+
+function CopyIconButton({
+  copied,
+  onClick,
+  label,
+}: {
+  copied: boolean
+  onClick: () => void
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={copied ? 'Copied' : label}
+      title={copied ? 'Copied!' : label}
+      className="rounded-lg border border-cursor-border-strong p-2 text-cursor-text hover:border-orange-500 hover:text-cursor-text"
+    >
+      {copied ? (
+        <svg
+          className="h-4 w-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      ) : (
+        <svg
+          className="h-4 w-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      )}
+    </button>
+  )
+}
+
 function App() {
   const [claims, setClaims] = useState<StandardClaims>(DEFAULT_CLAIMS)
   const [customClaims, setCustomClaims] = useState<CustomClaim[]>([])
@@ -46,9 +134,26 @@ function App() {
   const [token, setToken] = useState('')
   const [errors, setErrors] = useState<string[]>([])
   const [copied, setCopied] = useState(false)
+  const [payloadCopied, setPayloadCopied] = useState(false)
+  const [claimsJsonCopied, setClaimsJsonCopied] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [currentIat, setCurrentIat] = useState(() => Math.floor(Date.now() / 1000))
   const [customClaimsOpen, setCustomClaimsOpen] = useState(false)
+  const [customClaimsView, setCustomClaimsView] = useState<'list' | 'json'>('list')
+
+  const customClaimsJson = useMemo(() => {
+    const obj: Record<string, unknown> = {}
+    for (const claim of customClaims) {
+      const key = claim.key.trim()
+      if (key) obj[key] = parseClaimValue(claim.value)
+    }
+    return obj
+  }, [customClaims])
+
+  const customClaimsJsonText = useMemo(
+    () => JSON.stringify(customClaimsJson, null, 2),
+    [customClaimsJson],
+  )
 
   useEffect(() => {
     const tick = () => setCurrentIat(Math.floor(Date.now() / 1000))
@@ -121,6 +226,27 @@ function App() {
     }
   }
 
+  const handleCopyClaimsJson = async () => {
+    try {
+      await navigator.clipboard.writeText(customClaimsJsonText)
+      setClaimsJsonCopied(true)
+      setTimeout(() => setClaimsJsonCopied(false), 2000)
+    } catch {
+      setErrors(['Could not copy to clipboard.'])
+    }
+  }
+
+  const handleCopyPayload = async () => {
+    if (!decoded) return
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(decoded, null, 2))
+      setPayloadCopied(true)
+      setTimeout(() => setPayloadCopied(false), 2000)
+    } catch {
+      setErrors(['Could not copy to clipboard.'])
+    }
+  }
+
   const handleReset = () => {
     const hasData =
       secret ||
@@ -144,8 +270,11 @@ function App() {
     setToken('')
     setErrors([])
     setCopied(false)
+    setPayloadCopied(false)
+    setClaimsJsonCopied(false)
     setCurrentIat(Math.floor(Date.now() / 1000))
     setCustomClaimsOpen(false)
+    setCustomClaimsView('list')
   }
 
   const tokenParts = token ? splitToken(token) : null
@@ -188,7 +317,7 @@ function App() {
                     id="algorithm"
                     value={algorithm}
                     onChange={(e) => setAlgorithm(e.target.value as Algorithm)}
-                    className="w-full rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2.5 text-cursor-text outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                    className="field-select w-full rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2.5 text-cursor-text outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                   >
                     {ALGORITHMS.map((alg) => (
                       <option key={alg} value={alg}>
@@ -264,7 +393,7 @@ function App() {
                     onChange={(e) =>
                       setClaims((prev) => ({ ...prev, expDuration: e.target.value as ExpDuration }))
                     }
-                    className="w-full rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2.5 text-cursor-text outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                    className="field-select w-full rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2.5 text-cursor-text outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                   >
                     {EXP_DURATION_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -273,14 +402,13 @@ function App() {
                     ))}
                   </select>
                   {claims.expDuration === 'custom' && (
-                    <input
+                    <DatetimeInput
                       id="expCustom"
-                      type="datetime-local"
+                      className="mt-3"
                       value={claims.expCustom}
-                      onChange={(e) =>
-                        setClaims((prev) => ({ ...prev, expCustom: e.target.value }))
+                      onChange={(value) =>
+                        setClaims((prev) => ({ ...prev, expCustom: value }))
                       }
-                      className="mt-3 w-full rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2.5 text-cursor-text outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                     />
                   )}
                   {resolvedExp !== null && (
@@ -294,12 +422,10 @@ function App() {
                   <label htmlFor="nbf" className="mb-1.5 block text-sm font-medium text-cursor-text">
                     Not before (nbf)
                   </label>
-                  <input
+                  <DatetimeInput
                     id="nbf"
-                    type="datetime-local"
                     value={claims.nbf}
-                    onChange={(e) => updateClaim('nbf', e.target.value)}
-                    className="w-full rounded-lg border border-cursor-border-strong bg-cursor-elevated px-3 py-2.5 text-cursor-text outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                    onChange={(value) => updateClaim('nbf', value)}
                   />
                 </div>
               </div>
@@ -308,13 +434,22 @@ function App() {
             <div className="rounded-xl border border-cursor-border bg-cursor-surface p-5 sm:p-6">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-cursor-text">Custom claims</h2>
-                <button
-                  type="button"
-                  onClick={() => setCustomClaimsOpen(true)}
-                  className="rounded-lg border border-cursor-border-strong px-3 py-1.5 text-sm text-orange-400 hover:border-orange-500 hover:text-cursor-text"
-                >
-                  {customClaims.length === 0 ? '+ Add' : 'Edit'}
-                </button>
+                <div className="flex items-center gap-2">
+                  {customClaims.length > 0 && customClaimsView === 'json' && (
+                    <CopyIconButton
+                      copied={claimsJsonCopied}
+                      onClick={handleCopyClaimsJson}
+                      label="Copy JSON"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setCustomClaimsOpen(true)}
+                    className="rounded-lg border border-cursor-border-strong px-3 py-1.5 text-sm text-orange-400 hover:border-orange-500 hover:text-cursor-text"
+                  >
+                    {customClaims.length === 0 ? '+ Add' : 'Edit'}
+                  </button>
+                </div>
               </div>
 
               {customClaims.length === 0 ? (
@@ -322,22 +457,55 @@ function App() {
                   No custom claims yet. Add key-value pairs like userId, role, staffId…
                 </p>
               ) : (
-                <ul className="space-y-2">
-                  {customClaims.map((claim) => (
-                    <li
-                      key={claim.id}
-                      className="flex items-baseline gap-2 rounded-lg bg-cursor-bg/60 px-3 py-2 font-mono text-sm"
+                <>
+                  <div className="mb-4 flex gap-1 rounded-lg border border-cursor-border bg-cursor-bg/60 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setCustomClaimsView('list')}
+                      className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                        customClaimsView === 'list'
+                          ? 'bg-cursor-elevated text-cursor-text'
+                          : 'text-cursor-muted hover:text-cursor-text'
+                      }`}
                     >
-                      <span className="shrink-0 text-orange-400">
-                        {claim.key.trim() || '(empty key)'}
-                      </span>
-                      <span className="text-cursor-subtle">:</span>
-                      <span className="min-w-0 truncate text-cursor-text">
-                        {claim.value.trim() || '(empty)'}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                      List
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCustomClaimsView('json')}
+                      className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                        customClaimsView === 'json'
+                          ? 'bg-cursor-elevated text-cursor-text'
+                          : 'text-cursor-muted hover:text-cursor-text'
+                      }`}
+                    >
+                      JSON
+                    </button>
+                  </div>
+
+                  {customClaimsView === 'list' ? (
+                    <ul className="space-y-2">
+                      {customClaims.map((claim) => (
+                        <li
+                          key={claim.id}
+                          className="flex items-baseline gap-2 rounded-lg bg-cursor-bg/60 px-3 py-2 font-mono text-sm"
+                        >
+                          <span className="shrink-0 text-orange-400">
+                            {claim.key.trim() || '(empty key)'}
+                          </span>
+                          <span className="text-cursor-subtle">:</span>
+                          <span className="min-w-0 truncate text-cursor-text">
+                            {claim.value.trim() || '(empty)'}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <pre className="overflow-x-auto rounded-lg bg-cursor-bg p-4 font-mono text-sm leading-relaxed text-emerald-300">
+                      {customClaimsJsonText}
+                    </pre>
+                  )}
+                </>
               )}
             </div>
 
@@ -348,13 +516,7 @@ function App() {
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-cursor-text">Generated token</h2>
                 {token && (
-                  <button
-                    type="button"
-                    onClick={handleCopy}
-                    className="rounded-lg border border-cursor-border-strong px-3 py-1.5 text-sm text-cursor-text hover:border-orange-500 hover:text-cursor-text"
-                  >
-                    {copied ? 'Copied!' : 'Copy'}
-                  </button>
+                  <CopyIconButton copied={copied} onClick={handleCopy} label="Copy token" />
                 )}
               </div>
 
@@ -391,7 +553,16 @@ function App() {
             </div>
 
             <div className="rounded-xl border border-cursor-border bg-cursor-surface p-5 sm:p-6">
-              <h2 className="mb-4 text-lg font-semibold text-cursor-text">Decoded payload</h2>
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-cursor-text">Decoded payload</h2>
+                {decoded && (
+                  <CopyIconButton
+                    copied={payloadCopied}
+                    onClick={handleCopyPayload}
+                    label="Copy payload"
+                  />
+                )}
+              </div>
               {decoded ? (
                 <pre className="overflow-x-auto rounded-lg bg-cursor-bg p-4 font-mono text-sm leading-relaxed text-emerald-300">
                   {JSON.stringify(decoded, null, 2)}

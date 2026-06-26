@@ -56,4 +56,38 @@
   *::-webkit-scrollbar-thumb:hover {
     background-color: rgb(228 228 228 / 0.28);
   }
+
+  input[type='datetime-local'].field-datetime {
+    color-scheme: dark;
+  }
+
+  .field-datetime-wrap .field-datetime {
+    position: relative;
+  }
+
+  .field-datetime-wrap .field-datetime-icon {
+    z-index: 1;
+  }
+
+  .field-datetime-wrap .field-datetime::-webkit-calendar-picker-indicator {
+    position: absolute;
+    top: 50%;
+    right: 0.75rem;
+    z-index: 2;
+    width: 1rem;
+    height: 1rem;
+    margin: 0;
+    transform: translateY(-50%);
+    cursor: pointer;
+    opacity: 0;
+  }
+
+  select.field-select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='rgb(228 228 228 / 0.92)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1rem;
+    padding-right: 2.5rem;
+  }
 }
