@@ -87,6 +87,7 @@ export interface ValidationResult {
   errors: string[]
 }
 
+
 export function validateForm(
   secret: string,
   claims: StandardClaims,
